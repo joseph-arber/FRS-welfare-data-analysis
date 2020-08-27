@@ -1,0 +1,769 @@
+
+---
+  title: "FRS-Data Analysis Report"
+author: "Joseph Arber"
+date: "14/08/2020"
+output:
+  pdf_document: default
+word_document: default
+html_document: default
+---
+  
+  Project Aim
+========================================================
+  
+  The aim of this analysis was to explore the main themes and trends behind the welfare payments system in the UK. However, given the size of the dataset, this specific projects timeframe and intended audience, the scope of the analysis was narrowed down to focus on a few key questions. Notably, the analysis carried out tried to gain a better understanding through two dimensions:
+  
+  - **1. Qualitative Understanding:** What are the main drivers of welfare claims, and what are the key reasons for failure to meet debt repayments?
+  
+  
+  - **2. Quantitative Understanding:** Is housing benefit enough to sustain rent? 
+  
+  Specifically, this paper wanted to invesigate what welfare and benefit features included in the dataset are most correlated with a users inability to manage debt repayments. Alongside this, the analysis also sought to determine whether the cost living, housing and rental costs matched the amount a user recieves in benefit payments such as Universal Credit, Housing Allowance and several others. 
+
+Data
+========================================================
+  
+  This report captures the key analysis captured from the 'FRS' dataset. The dataset is drawn from the 2017 version of the Family Resources Survey (FRS), a nationally representative cross-sectional survey of UK households. The attached datset includes only those households from the FRS that are eligible for Universal Credit, according to the Policy in Practice policy micro-simulation engine (the Benefit and Budgeting Calculator). The dataset includes household information on demographics, earnings and other income drawn from the raw FRS data, as well as benefit eligibility (under both Universal Credit and the legacy system) as modelled by the Policy in Practice engine.
+
+The dataset has **4545** unique observations and **36** feature columns. A glimpse of the features in the dataset is given below. 
+
+```{r Loading the data, message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
+library(dplyr)
+library(tidyverse)
+library(magrittr)
+library(readr)
+library(data.table)
+
+df <- read_csv("data/FRS2017extract.csv")
+View(df)
+
+#Check the column names
+#colnames(df)
+#Check the variable types
+df %>% summarise_all(typeof) %>% gather
+```
+
+```{r Column names, include=FALSE}
+data.table(colnames(df))
+```
+
+**Data Cleaning**
+  
+  Some basic data manipulation was done at the start. This included removing the unwanted columns from the dataset as well as dealing any missing values encountered. As such, the following variables were removed:
+  
+  - Child ages
+- Age group (band) and Age group Universal Credit
+
+```{r Dropping variables, message=FALSE, warning=FALSE, include=FALSE}
+#Drop unwanted columns from the dataframe
+df <- select (df,-c(X1, child7_age, child6_age, child4_age, 
+                    child3_age, child2_age, child1_age, agegroup, agegroup_uc))
+#Check if columns are still in the dataframe
+if("X1" %in% colnames(df))
+{cat("Features have been removed!\n");}
+```
+
+Summary and Descriptive Statistics | Early Stage EDA
+========================================================
+  
+  **Standard Deviations**
+  
+  It is also useful to get an understanding of how the features in this dataset are dispersed. The standard deviations and mean values for the data are displayed below. 
+
+
+```{r Standard Deviations, message=FALSE, warning=FALSE, include=FALSE}
+library(GMCM)
+
+#Let's take a look at the standard deviation for some selected columns
+sd(df$monthly_rent)
+sd(df$estimated_household_costs)
+sd(df$housing_benefit_eligibility)
+sd(df$earnings)
+sd(df$nonmeanstested_income)
+sd(df$income_aftercosts)
+sd(df$child_tax_credit_eligibility)
+sd(df$number_of_children)
+sd(df$UC_eligibility)
+
+```
+
+
+```{r descriptive statistics, message=FALSE, warning=FALSE, include=FALSE}
+library(descr)
+library(summarytools)
+library(magrittr)
+df %>% descr(stats = "common") %>% tb()
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+descr(df, stats =c("mean", "sd", "min", "max"),transpose = TRUE)
+
+```
+
+```{r include=FALSE}
+library(stargazer)
+#stargazer(df)
+results='asis'
+stargazer(df, header=FALSE, type='latex')
+
+```
+
+The mean values for the variables in the dataset are also displayed. An interesting finding was that "child tax credit" has is higher on average than "housing benefit". Notably, the mean for "income after costs" is approximatley £391. However, the variation (standard deviation) is £753, suggesting that there is disparity between those with the highest incomes and those with the lowest.  
+
+
+```{r include=FALSE}
+
+mean(df$monthly_rent)
+mean(df$estimated_household_costs)
+mean(df$housing_benefit_eligibility)
+mean(df$earnings)
+mean(df$nonmeanstested_income)
+mean(df$income_aftercosts)
+mean(df$child_tax_credit_eligibility)
+mean(df$number_of_children)
+mean(df$UC_eligibility)
+```
+
+
+Data Distribution | EDA Continued
+========================================================
+  
+  ### Variable 1: One-way Feature Analysis of "User Age"
+  After exploring the descriptive statistics of the dataset, it made sense to focus on the data distribution and structure of some of the key variables in the larger dataset. It was also helpful to explore the structure of some of the demographic variables in the dataset. Below we have grouped five demographic variables as "key columns of interest", doing this give a good overview of the data. 
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+setDT(df)
+#Have a look at the columns of interest
+columns_of_interest <-  c('age_user','gender_user','number_of_children', 'tenure', 'disability') 
+table_6 <- df[,head(.SD,6), .SDcols = columns_of_interest]
+
+```
+
+```{r Table - columns of interest, echo=FALSE, message=FALSE, warning=FALSE}
+library(knitr)
+library(kableExtra)
+kable(table_6, "latex", caption = "Columns of Interest", booktabs = T) %>%
+  kable_styling(font_size = 6)
+```
+
+```{r Data Density - User Age, echo=FALSE, fig.height=3, fig.width=3, message=FALSE, warning=FALSE}
+#Density plot
+ggplot(data = df, aes(x = age_user)) + 
+  geom_density(fill = "green")
+
+#Histogram plot
+library(ggplot2)
+# Basic histogram
+# Change the width of bins
+ggplot(df, aes(x=age_user)) + 
+  geom_histogram(binwidth=3)
+
+```
+
+```{r echo=FALSE, fig.height=3, fig.width=3, message=FALSE, warning=FALSE}
+# Change colors
+a<-ggplot(df, aes(x=age_user)) + 
+  geom_histogram(color="black", fill="white") 
+#Add a mean line
+# Add mean line
+a+ geom_vline(aes(xintercept=mean(age_user)),
+              color="blue", linetype="dashed", size=1)
+
+# Histogram with density plot
+ggplot(df, aes(x=age_user)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.4, fill="#FF6666") 
+
+
+```
+
+
+Despite the user age data peaking slightly at the age 20 mark, the density graph showed us that the "user age" of benefits is fairly spread out. Overall there is really not any age over or underrepresented. In other words the data is "uniformally distributed". The histogram plots confirm this assumption. We also plotted a histogram which displays the mean (age = 40) for user age values which provides a good benchmark for understanding the variation in the data. Further analysis was conducted on the "user age" variable. In addition to this we also created a new variable, **"age_group"** in which users were be placed into respective bins based on their age. Users were placed into bins based on their age, with the intervals between **17** as the minimum age and **65** as the maximum in the sample set. A function was created to sequence the age data and fill each value to a correct bin. 
+
+
+```{r include=FALSE}
+#Check the minimum age and maximum age:
+df %>% summarize(
+  min = min(age_user), 
+  max = max(age_user))
+
+```
+
+
+```{r Binning, warning=FALSE, include=FALSE}
+labs <- c(paste(seq(0, 95, by = 10), seq(0 + 10 - 1, 100 - 1, by = 10),
+                sep = "-"), paste(100, "+", sep = ""))
+labs
+
+df$age_group <- cut(df$age_user, breaks = c(seq(0, 100, by = 10), Inf), labels = labs, right = FALSE)
+
+```
+
+```{r eval=FALSE, include=FALSE}
+head(df[c("age_user", "age_group")], 15)
+
+```
+
+We can see now see the data variation for users who have **multiple children**. The results are fairly intuitive as the age group, 30-39, is associated with the most number of children, however these insights are still useful nonethless. 
+
+```{r Freq plot, echo=FALSE, fig.align="center", fig.height=4, fig.width=4, message=FALSE, warning=FALSE}
+#Density plot
+ggplot(data = df, mapping = aes(x = number_of_children, colour = age_group)) +
+  geom_freqpoly(binwidth = 0.9)
+
+```
+
+
+Two-Way Feature Analysis: Categorical and Continous Variables
+========================================================
+  
+  A brief examination was also done of the some of the other important demographic variables in the dataset. This included, **gender of user, number of children, household type, tenure and disability**. The results of which are highlighted below. 
+
+```{r include=FALSE}
+#Have a look at the columns of interest
+table(df$number_of_children, df$gender_user)
+
+```
+
+```{r count function, echo=FALSE}
+df %>% count(number_of_children, householdtype, tenure, disability)
+```
+
+
+#### What is the relationship between gender/age and earnings/savings?
+
+The relationship between gender the welfare state is a complex topic, it is beyound the scope of this report to go into detailed analysis. Although it was examined whether there is a link between "gender" and "earnings". The boxplots below highlight the data distribution for male and female earnings. The plots indicate that on average males earn slightly more and have greater savings than females. Although this may be due to the effect of some outlier values.
+
+```{r Table - Gender split, echo=FALSE, message=FALSE, warning=FALSE}
+table_7<-table(df$gender_user)
+
+kable(table_7, "latex", caption = "Gender Split", booktabs = T) %>%
+  kable_styling(font_size = 6)
+```
+
+```{r Distribution of categorical features, fig.height=3, fig.width=3, message=FALSE, warning=FALSE, include=FALSE}
+
+# Basic box plot
+b <- ggplot(df, aes(x=gender_user, y=earnings)) + 
+  geom_boxplot()
+b
+```
+
+```{r echo=FALSE, fig.height=3, fig.width=3, message=FALSE, warning=FALSE}
+
+d <- ggplot(df, aes(x=gender_user, y=savings)) + stat_summary(fun.y=mean) +
+  geom_bar(stat = "identity") 
+d
+
+b + geom_jitter(shape=16, position=position_jitter(0.2))
+
+# Notched box plot
+#ggplot(df, aes(x=gender_user, y=earnings)) + 
+#geom_boxplot(notch=TRUE)
+
+# Box plot with dot plot
+#b + geom_dotplot(binaxis='y', stackdir='center', dotsize=1)
+# Box plot with jittered points
+# 0.2 : degree of jitter in x direction
+#b + geom_jitter(shape=16, position=position_jitter(0.2))
+```
+
+
+
+
+#### What is the data distribution at the household level?
+
+```{r age vs household type, echo=FALSE, fig.align="center", fig.height=3, fig.width=7, message=FALSE, warning=FALSE}
+#barplot for distribution of the household type
+ggplot(data = df) +
+  geom_bar(mapping = aes(x = householdtype, fill =  age_group),position= "dodge")
+
+```
+
+The data distribution at the household level indicates that most welfare users in the sample set are "single", with the largest proportion of welfare users (this could include but not limited to universal credit, housing benefit, child care benefit) being single 20-29 year olds. At the other end of the scale, perhaps more intuitivley, couples without children are far less represented in the dataset. 
+
+# Feature Selection: Covariation and Correlation
+
+If variation describes the behavior within a variable, covariation describes the behavior between variables. Covariation is the tendency for the values of two or more variables to vary together in a related way. The best way to spot covariation is to visualise the relationship between two or more variables. Before visualising the relationships between certain features in this dataset, we will first explore the correlation levels in the dataset. The correlation plot below highlights the highly correlated variables in the dataset.
+
+```{r correlation plots, echo=FALSE, fig.align="center", fig.height=6, fig.width=6, message=FALSE, warning=FALSE}
+#package dependenices
+library(corrplot)
+library(RColorBrewer)
+
+library(GGally)
+#plot correlation matrix
+ggcorr(df,nbreaks = 5)
+
+```
+```{r include=FALSE}
+
+# Pearson correlation coefficients, using pairwise observations (default method)
+ggcorr(df[, -1], method = c("pairwise", "pearson"))
+# Pearson correlation coefficients, using all observations
+#ggcorr(df[, -1], method = c("everything", "pearson"))
+# Kendall correlation coefficients, using complete observations
+#ggcorr(df[, -1], method = c("complete", "kendall"))
+
+```
+
+There are a number of intituitive findings we can take from the correlation plot. As expected more children is correlated with higher household costs, but having more children is also correlated with higher housing benefit.
+
+#### Factor Analysis
+
+A simple Exploratory Factor Anlaysis model was deployed. The rationale for doing this being that it allows us to reduce the dimensionality of the data, which is vital for selecting features for the later models. 
+
+```{r new dataframe, echo=FALSE, message=FALSE, warning=FALSE}
+#create a new dataframe
+df_num <- data.frame("Monthly_rent" = df$monthly_rent, 
+                     "Household_costs" = df$estimated_household_costs, 
+                     "Income_aftercosts" = df$income_aftercosts,
+                     "Takeshomeincome" = df$takehomeincome_legacy,
+                     "TakehomeUC" = df$takeshomeincome_UC,
+                     "Earnings" = df$earnings,
+                     "UC_total" = df$UC_eligibility,
+                     "Child_credit" = df$child_tax_credit_eligibility,
+                     "Working_tax_credit" = df$working_tax_credit_eligibility) 
+
+#colnames(df_num)
+```
+
+```{r EFA, fig.align="center", fig.height=5, fig.width=7, message=FALSE, warning=FALSE, include=FALSE}
+library(psych)
+# Maximum Likelihood Factor Analysis
+# entering raw data and extracting 3 factors, 
+# with varimax rotation 
+
+fit <- factanal(df_num, 4, rotation="varimax")
+print(fit, digits=2, cutoff=.3, sort=TRUE)
+```
+
+```{r echo=FALSE}
+# plot factor 1 by factor 2 
+load <- fit$loadings[,1:2] 
+plot(load,type="n") # set up plot 
+text(load,labels=names(df_num),cex=.7) # add variable names
+
+```
+
+```{r EFA results, message=FALSE, warning=FALSE, include=FALSE}
+# Principal Axis Factor Analysis
+library(psych)
+fit <- factor.pa(df_num, nfactors=3)
+fit # print results
+
+```
+
+
+
+### Analysis of the Continous variables | Continued
+
+Using the correlation plot we can now begin to drill down on the continous variables in the dataset. This includes understanding whether benefit payments are evenly distributed across the different demographic segments as shown below. 
+
+```{r echo=FALSE, fig.height=3, fig.width=5, fig.align="center"}
+ggplot(data = df, mapping = aes(x = earnings)) + 
+  geom_freqpoly(mapping = aes(colour = age_group), binwidth = 500)
+
+```
+
+**Two Continous Variables**
+  
+  The first thing to try and understand is whether selected welfare payments cover or match a users expenses. It is beyound the scope of this anlaysis to quantify these relationships, but visualising the data is likley to  provide us with a high-level understanding of how effective the welfare state system. 
+
+```{r numerical/continous variable analysis, fig.height=3, fig.width=3, message=FALSE, warning=FALSE, include=FALSE}
+#Housing Benefit
+#Filtered scatter plots showing relationship between housing benefit size and monthly rent size
+df%>%
+  filter(housing_benefit_eligibility > 100)%>%
+  filter(monthly_rent > 100)%>%
+  ggplot(aes(x=monthly_rent, y=housing_benefit_eligibility, colour=managing_debt_payments)) +
+  geom_point(alpha = 0.3, se = FALSE) + geom_jitter() + theme(legend.position="top")
+
+
+
+# Plot household costs vs housing benefit eligibility
+qplot(df$estimated_household_costs, 
+      df$housing_benefit_eligibility,
+      colour = managing_debt_payments,
+      data = df, 
+      geom = c("point", "smooth"), 
+      method = "lm", 
+      alpha = I(1 / 5), 
+      se = FALSE) + theme(legend.position = "none")
+
+#Universal Credit
+#ggplot(df, aes(UC_eligibility, income_aftercosts, colour=managing_debt_payments)) + geom_point() + geom_jitter(alpha=0.3) +
+#theme(legend.position = "none")
+
+#library(hexbin)
+#ggplot(data = df) +
+# geom_hex(mapping = aes(x = income_aftercosts, y = UC))
+
+```
+
+```{r correlation plot, echo=FALSE, fig.align="center", fig.height=5, fig.width=5, message=FALSE, warning=FALSE}
+
+# Create scatterplot with trend line for each species
+ggplot(df, aes(estimated_household_costs, UC_eligibility, col = managing_debt_payments)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth() +
+  labs(x = "Household Costs", y = "Universal Credit")+ ggtitle("Household Costs vs Universal Credit") +
+  theme(panel.background = element_rect(fill = "NA"),
+        axis.line = element_line(color = "black")) + geom_jitter() + theme(legend.position = "top")
+
+
+```
+
+A number of the continous variables were analysed, but the main thing to establish was whether there was a relationship between costs and **rental vs benefit and credit eligibility**. As seen in the scatterplot above, an increase in household costs is (as expected) associated with an increase in univeral credit (designed to help with costs and to replace household benefit). Moreover, there is a slight variation between those struggling with debt and those not, particuarly at the higher cost levels. 
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Create scatterplot with trend line
+ggplot(df, aes(estimated_household_costs, UC_eligibility)) +
+  geom_hex(bins = 15) +
+  labs(x = "Household Costs", y = "Universal Credit")+
+  theme(panel.background = element_rect(fill = "NA"),
+        axis.line = element_line(color = "black"))
+
+```
+
+
+```{r Child Tax Credit Table, message=FALSE, warning=FALSE, include=FALSE}
+#**What about Child Tax Credit?**
+
+#How much credit are household types on average able to claim?
+
+aggregate(df$child_tax_credit_eligibility,
+          by = list(Child_Benefits = df$householdtype),
+          mean)
+
+```
+
+## Hypothesis
+
+### Why are some users struggling to manage debt payments?
+
+For most welfare users, household and monthly rental costs are likley to form the largest share of their expenditures. However, the structure of the household (single, couple, single with children), the type of tenure they occupy (private, social, landlord), and of course the number of children they have also likley to significantly influence a users ability to navigate the welfare state and manage their personal finances. 
+
+Some key questions to consider are:
+  
+  - Is their monthly rent & household costs too high?
+  - Are they are a single parent?
+  - Do they recieve enough in benefit compared to their earnings? (E.g. Is the benefits system working as it should be)
+
+First it is useful to see which segments are more likley to struggle with debt. We do this by visualising the variation at the household structure level as well as the type of tenure a user occupies.
+
+```{r echo=FALSE, fig.height=5, fig.width=3, message=FALSE, warning=FALSE}
+#barplot for distribution of living tenure
+ggplot(data = df) +
+  geom_bar(mapping = aes(x = tenure, fill=managing_debt_payments)) + theme(legend.position = "top", axis.text.x = element_text(angle=90, hjust=1)) 
+
+ggplot(data = df) + 
+  geom_bar(mapping = aes(x = householdtype, fill = managing_debt_payments)) + theme(legend.position = "top", axis.text.x = element_text(angle=90, hjust=1))
+```
+
+Evidently, users who are **social tenants** (occupy state housing) are far more likley to struggle with debt management than those in private accomodation. On a similar level, welfare users who are "single parents" also tend to struggle with debt payments more frequently. 
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+ans <- df[managing_debt_payments == "No"]
+head(ans)
+
+bns <- df[managing_debt_payments == "Yes"]
+head(bns)
+
+```
+
+Is there variation in the average rental and household costs between those managing debt payments and those not? To get a better idea, we summarised the mean values for the different costs and benefits by whether or not a user was managing debt payments.
+
+```{r Variation for debt repayment, message=FALSE, warning=FALSE, include=FALSE}
+#Average rent for users who are "struggling" with debt
+table_1<-ans %>% summarize(
+  mean = mean(monthly_rent),
+  min = min(monthly_rent),
+  max = max(monthly_rent))
+
+#Average rent for users who are "not struggling" with debt
+table_2<-bns %>% summarize(
+  mean = mean(monthly_rent),
+  min = min(monthly_rent),
+  max = max(monthly_rent))
+
+#Average housing benefit eligibility for users who are  "struggling" with debt
+table_3<-ans %>% summarize(
+  mean = mean(housing_benefit_eligibility),
+  min = min(housing_benefit_eligibility),
+  max = max(housing_benefit_eligibility))
+
+#Average housing benefit eligibility for users who are "not struggling" with debt
+table_4<-bns %>% summarize(
+  mean = mean(housing_benefit_eligibility),
+  min = min(housing_benefit_eligibility),
+  max = max(housing_benefit_eligibility))
+
+```
+
+
+The tables above capture the relationship between monthly rental costs and the amount a user is eligible for in housing benefit and their ability to manage debt payments. The results are important for two reasons:
+  
+  - 1. It indicates that on average monthly rent for those who struggle with debt payments is substantially higher than the rent for those who can manage debt.
+
+- 2. That users who struggle with managing debt, on average tend to receive more (annually) in state housing benefit than their counterparts.
+
+```{r Mean Variations, echo=FALSE, message=FALSE, warning=FALSE}
+library(knitr)
+library(kableExtra)
+kable(table_1, "latex", caption = "Monthly rent for users unable to manage debt", booktabs = T) %>%
+  kable_styling(font_size = 7) 
+kable(table_2, "latex", caption = "Monthly rent for users able to manage debt",  booktabs = T) %>%
+  kable_styling(font_size = 7)
+kable(table_3, "latex", caption = "Housing benefit eligibility for users unable to manage debt", booktabs = T)%>%
+  kable_styling(font_size = 7)
+kable(table_4, "latex", caption = "Housing benefit eligibility for users able to manager debt", booktabs = T)%>%
+  kable_styling(font_size = 7)
+
+```
+
+As shown below we are also able to see a breakdown of the demographic segments for rental and household costs.
+
+```{r Table Input, message=FALSE, warning=FALSE, include=FALSE}
+
+table <- ans %>% 
+  group_by(tenure, gender_user) %>% 
+  summarise(
+    average_monthly_rent = mean(monthly_rent),
+    housing_costs = mean(estimated_household_costs) # the average positive monthly rent
+  )
+table
+
+```
+
+```{r Knitr Tables, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+
+#kable(cbind(table), "latex", booktabs = T) %>%
+# kable_styling(latex_options = c("striped") %>%
+#              column_spec(1, width = "8cm"))
+
+kable(table, "latex", booktabs = T) %>%
+  kable_styling(font_size = 7)
+
+```
+
+
+```{r fig.height=3, fig.width=3, message=FALSE, warning=FALSE, include=FALSE}
+# calculate mean salary for each rank
+plotdata <- ans%>%
+  group_by(householdtype) %>%
+  summarize(mean_rent = mean(monthly_rent))
+
+# plot mean salaries
+ggplot(plotdata, 
+       aes(x = householdtype, 
+           y = mean_rent)) +
+  geom_bar(stat = "identity") + ggtitle("Struggling with debt payments") + theme(axis.text.x = element_text(angle=90, hjust=1))
+
+
+plotdata_2 <- bns%>%
+  group_by(householdtype) %>%
+  summarize(mean_rent = mean(monthly_rent))
+
+# plot mean salaries
+ggplot(plotdata_2, 
+       aes(x = householdtype, 
+           y = mean_rent)) +
+  geom_bar(stat = "identity") + ggtitle("Managing debt payments") + theme(axis.text.x = element_text(angle=90, hjust=1))
+
+
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+ggplot(ans, aes(x=earnings, y = monthly_rent)) + geom_point() + geom_abline() + geom_jitter()
+ggplot(bns, aes(x=earnings, y = monthly_rent)) + geom_point(alpha = 0.5) + geom_abline() + geom_jitter() 
+
+```
+
+```{r fig.align="center", fig.height=5, fig.width=5, message=FALSE, warning=FALSE, include=FALSE}
+# Basic box plot
+b <- ggplot(ans, aes(x=gender_user, y=monthly_rent)) + 
+  geom_boxplot()
+b
+```
+
+
+```{r household type vs debt management, echo=FALSE, fig.align="center", fig.height=4, fig.width=7, message=FALSE, warning=FALSE}
+#boxplot for managing debt payments
+ggplot(data = df, # add the data
+       aes(x = householdtype, y = earnings, # set x, y coordinates
+           color = managing_debt_payments)) + geom_boxplot() + theme(legend.position = "top")
+
+
+```
+
+```{r echo=FALSE, fig.align="center", fig.height=5, fig.width=8, message=FALSE, warning=FALSE}
+ggplot(data = df, # add the data
+       aes(x = householdtype, y = earnings, # set x, y coordinates
+           color = tenure)) + geom_boxplot() + facet_grid(~managing_debt_payments) + theme(legend.position="top", axis.text.x = element_text(angle=90, hjust=1))
+
+
+
+
+```
+
+As we are interested in how values for a given variable differ between two groups. For example, does the size of household costs incured by a user affect the users ability to manage to debt payments. The summary statistics are given above, which suggest users that struggle with debt may, on average, have larger household and rental costs than users that do not struggle with debt. This is all good, but there are likley to be several factors that influence debt problems. Whether it is the size of a users earnings, or the number of a children a household has, there are clearly a number of significant variables. 
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+table_10 <- df %>%
+  group_by(managing_debt_payments) %>%
+  summarise(
+    avg_costs = mean(estimated_household_costs),
+    sd_costs  = sd(estimated_household_costs),
+    avg_inc_pc = mean(income_aftercosts),
+    sd_inc_pc = sd(income_aftercosts),
+    avg_earnings = mean(earnings),
+    sd_earnings = sd(earnings),
+    avg_children = mean(number_of_children),
+    sd_children = sd(number_of_children),
+    n       = n()
+  )
+```
+
+```{r Comparing Means of Three or More Groups, echo=FALSE, message=FALSE, warning=FALSE}
+kable(table_10, "latex", caption = "Comparing Means of Different Features", booktabs = T)%>%
+  kable_styling(latex_options = c("striped", "scale_down"))
+
+```
+
+```{r fig.align="center", fig.height=4, fig.width=5, message=FALSE, warning=FALSE, include=FALSE}
+ggplot(df, aes(managing_debt_payments, monthly_rent)) +
+  geom_boxplot() +
+  coord_flip()
+```
+
+
+However, the question remains, how certain are we that there is a difference in distances between the two user groups? Assuming this data is a sample of a larger population data set,there is some uncertainty (margin of error) around the estimated mean produced by a sample. If the margin of error is large then we cannot state that any differences in mean values between these groups are statistically significant. Therefore we would need to test for the difference in group means by using the two-sample test statistic.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+t.test(monthly_rent ~ managing_debt_payments, data = df)
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+table_11 <- df %>%
+  group_by(householdtype) %>%
+  summarise(
+    avg_rent = mean(monthly_rent),
+    sd_rent  = sd(monthly_rent),
+    avg_cost = mean(estimated_household_costs),
+    sd_cost = sd(estimated_household_costs),
+    avg_house_credit = mean(housing_benefit_eligibility),
+    sd_house_credit = sd(housing_benefit_eligibility),
+    n       = n()
+  )
+```
+
+```{r echo=FALSE}
+kable(table_11, "latex", caption = "Comparing Means of Three or More Groups", booktabs = T)%>%
+  kable_styling(font_size = 7)
+
+```
+
+
+```{r echo=FALSE, fig.align="center", fig.height=4, fig.width=5, message=FALSE, warning=FALSE}
+ggplot(df, aes(householdtype, monthly_rent)) +
+  geom_boxplot() +
+  coord_flip()
+```
+
+We can turn to analysis of variance (ANOVA) to assess these hypotheses. 
+
+```{r echo=FALSE}
+anova_results <- aov(monthly_rent ~ householdtype, data = df)
+summary(anova_results)
+
+```
+
+```{r include=FALSE}
+TukeyHSD(anova_results)
+
+```
+
+## Evaluation and Conclusions
+
+We have seen the difficulty in distinguishing what influences debt managment in the welfare state system. The statistical tests that were run attempted to demonstate the variation in the experiences that users who struggle with debt have compared to user which do not. However, with no real certainty can we claim statistical significance, as this stage more modelling and more accurate feature seleciton is required which is beyound the scope of this analysis. 
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+## Multivariate Data Analysis
+
+Multivariate data analysis is a set of statistical models that examine patterns in multidimensional data by considering, at once, several data variables. It is an expansion of bivariate data analysis, which considers only two variables in its models. As multivariate models consider more variables, they can examine more complex phenomena and find data patterns that more accurately represent the real world.
+
+However, the question we are trying to answer is a binary one. Specifically, the outcome we are trying to understand is:
+  
+  - What is the main driver of a user struggling with debt payments
+
+In this instance, the feature in question is a binary variable, "Yes" or "No". Therefore the appropriate model is a Generalised Logistic Regression Model (GLM). 
+
+```
+
+```{r recoding variable (0/1), include=FALSE}
+df$managing_debt <- ifelse(df$managing_debt_payments == 'Yes', 1, 0)
+table(df$managing_debt)
+```
+
+```{r eval=FALSE, include=FALSE}
+To model the data we had to first recode the variable "managing debt payments" to "1" or "0" dependent on whether they were managing or not managing. Doing this allowed us to succesfully run a logistic regression model. 
+```
+
+```{r GLM - Model 1, message=FALSE, warning=FALSE, include=FALSE}
+library(modelr)
+library(texreg)
+options(na.action = na.warn)
+
+
+model_1 <-glm(managing_debt ~ householdtype + gender_user + number_of_children, data = df, family = "binomial")
+summary(model_1)
+screenreg(model_1) 
+```
+
+```{r include=FALSE}
+probs<- predict(model_1,type = "response")
+probs[1:5]
+
+glm.pred <- ifelse(probs > 0.5, "Yes", "No")
+glm.pred[1:100]
+
+#attach(Smarket)
+
+#model_2 <-lm(UC_eligibility ~ estimated_household_costs + monthly_rent + age_user, data = df)
+#summary(model_2)
+```
+
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+# Overlaid histograms
+ggplot(df, aes(x=estimated_household_costs, color=tenure)) +
+  geom_histogram(fill="white", alpha=0.5, position="identity")
+
+```
+
+```{r fig.height=6, fig.width=6, include=FALSE}
+# Create scatterplot with trend line for each species
+
+df %>%
+  filter(estimated_household_costs & housing_benefit_eligibility > 1) %>%
+  ggplot(aes(estimated_household_costs, housing_benefit_eligibility, col = managing_debt_payments,shape = as.factor(tenure))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth() +
+  labs(x = "Household Costs", y = "Housing Benefit")+ ggtitle("The relationship between housing costs and housing benefit (GAM-boosted)")
+theme(panel.background = element_rect(fill = "NA"),
+      axis.line = element_line(color = "black")) 
+
+```
